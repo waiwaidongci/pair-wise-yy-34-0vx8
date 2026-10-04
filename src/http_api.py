@@ -42,9 +42,25 @@ def make_handler(service: Service, static_dir: str):
         def _identity(self) -> Tuple[str, str]:
             return self.headers.get("X-Actor", ""), self.headers.get("X-Role", "")
 
+        def _operation_no(self) -> Optional[str]:
+            value = self.headers.get("X-Operation-No")
+            if value is None:
+                value = self.headers.get("X-Operation-Id")
+            if value is not None:
+                value = value.strip()
+                if value:
+                    return value[:120]
+            body = getattr(self, "_cached_body", None)
+            if isinstance(body, dict):
+                op = body.get("operation_no") or body.get("operation_id")
+                if isinstance(op, str) and op.strip():
+                    return op.strip()[:120]
+            return None
+
         def _body(self) -> Dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0") or 0)
             if length <= 0:
+                self._cached_body = {}
                 return {}
             if length > 2_000_000:
                 raise ValidationError("请求体过大")
@@ -54,6 +70,7 @@ def make_handler(service: Service, static_dir: str):
                 raise ValidationError("请求体不是有效JSON") from exc
             if not isinstance(value, dict):
                 raise ValidationError("请求体必须是JSON对象")
+            self._cached_body = value
             return value
 
         def _send_error(self, exc: Exception) -> None:
@@ -89,6 +106,16 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"records": service.list_records(item_id, role)})
+                elif path.startswith("/api/items/") and path.endswith("/conflicts"):
+                    item_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"drafts": service.list_conflict_drafts(item_id, role)})
+                elif path.startswith("/api/items/") and path.endswith("/snapshots"):
+                    item_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"snapshots": service.list_snapshots(item_id, role)})
                 elif path.startswith("/api/items/"):
                     item_id = int(path.rsplit("/", 1)[-1])
                     actor, role = self._identity()
@@ -108,17 +135,23 @@ def make_handler(service: Service, static_dir: str):
                 path = urlparse(self.path).path
                 actor, role = self._identity()
                 body = self._body()
+                operation_no = self._operation_no()
                 if path == "/api/items":
-                    self._json(201, service.create_item(body, actor, role))
+                    self._json(201, service.create_item(body, actor, role,
+                                                        operation_no=operation_no))
                 elif path.startswith("/api/items/") and path.endswith("/records"):
                     item_id = int(path.split("/")[3])
-                    self._json(201, service.add_record(item_id, body, actor, role))
+                    result = service.add_record(item_id, body, actor, role,
+                                                operation_no=operation_no)
+                    status = 200 if result.get("conflict") else 201
+                    self._json(status, result)
                 elif path.startswith("/api/items/") and path.endswith("/transition"):
                     item_id = int(path.split("/")[3])
                     target = body.get("target")
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
-                        item_id, target, expected, actor, role))
+                        item_id, target, expected, actor, role,
+                        operation_no=operation_no))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:

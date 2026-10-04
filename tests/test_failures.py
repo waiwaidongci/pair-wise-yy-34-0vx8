@@ -13,8 +13,12 @@ class FailureTest(unittest.TestCase):
         with self.assertRaises(PermissionDenied): self.service.transition(self.item["id"],STATES[1],1,"attacker","viewer")
         with self.assertRaises(ConflictError): self.service.transition(self.item["id"],STATES[1],99,"reviewer",TRANSITION_ROLES[STATES[1]][0])
         payload={"kind":"action","detail":"same reference","status":"open","external_ref":"DUP-1"}
-        self.service.add_record(self.item["id"],payload,"recorder",'investigator')
-        with self.assertRaises(ConflictError): self.service.add_record(self.item["id"],payload,"recorder",'investigator')
+        first=self.service.add_record(self.item["id"],payload,"recorder",'investigator')
+        self.assertFalse(first["conflict"])
+        # 两名调查员提交同一措施：先到者生效，后到者留冲突稿，不再抛 ConflictError
+        second=self.service.add_record(self.item["id"],payload,"recorder",'investigator')
+        self.assertTrue(second["conflict"])
+        self.assertIsNotNone(second["draft"]["id"])
         current=self.service.get_item(self.item["id"],"viewer")
         for target in STATES[1:-1]: current=self.service.transition(current["id"],target,current["version"],"reviewer",TRANSITION_ROLES[target][0])
         with self.assertRaises(ConflictError): self.service.transition(current["id"],STATES[-1],current["version"],"reviewer",TRANSITION_ROLES[STATES[-1]][0])
