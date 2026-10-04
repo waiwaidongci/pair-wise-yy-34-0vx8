@@ -30,9 +30,19 @@ python3 app.py --db ./data.db --port 8311
 - `GET /api/items/{id}`
 - `POST /api/items/{id}/records`
 - `POST /api/items/{id}/transition`，必须提交`expected_version`
+- `GET /api/items/{id}/closures`，查看关闭快照（含已失效快照的冻结内容）
 - `GET /api/audit`
 
 允许角色：reporter, investigator, safety_manager, viewer。严重度越高、伤害指数越大或未关闭措施越多，优先级越高；严重事故必须在4小时内启动调查。
+
+## 关闭复核
+
+- 关闭时在同一事务内冻结事故版本和全部措施状态，生成关闭快照（`closure_snapshots`）。
+- 归档后补录复诊/复发措施仍被允许，但关闭依据一变当前结论即失效：事故自动回到`verification`并递增版本，原快照标记`invalidated`并保留，安全经理持旧版本放行会被版本冲突拒绝；重新关闭会生成新快照。
+- 两名调查员同时提交同一措施（相同`external_ref`）时先到者生效，后到者保留冲突稿（`record_conflicts`），`GET /api/items/{id}/records`同时返回`records`与`conflicts`。
+- 审计事件携带操作号`op_id`（如`transition:{item}:{version}`、`record:{id}`），写入失败后按操作号恢复，重试不重复记账。
+- 启动时自动为没有快照的旧事故按现状补齐快照（`source=backfill`，幂等）。
+- 列表与详情的`closure`字段及审计中的`closure_invalidated`事件展示失效来源（触发记录、操作人、时间）。
 
 ## 测试
 

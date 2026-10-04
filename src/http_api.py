@@ -88,7 +88,15 @@ def make_handler(service: Service, static_dir: str):
                     item_id = int(path.split("/")[3])
                     actor, role = self._identity()
                     del actor
-                    self._json(200, {"records": service.list_records(item_id, role)})
+                    self._json(200, {
+                        "records": service.list_records(item_id, role),
+                        "conflicts": service.list_record_conflicts(item_id, role),
+                    })
+                elif path.startswith("/api/items/") and path.endswith("/closures"):
+                    item_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"closures": service.list_closures(item_id, role)})
                 elif path.startswith("/api/items/"):
                     item_id = int(path.rsplit("/", 1)[-1])
                     actor, role = self._identity()
